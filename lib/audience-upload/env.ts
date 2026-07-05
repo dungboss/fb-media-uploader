@@ -77,8 +77,8 @@ export function getAudienceUploadConfig(): AudienceUploadConfig {
     presignedUrlTtlSeconds: readNumberEnv("UPLOAD_PRESIGN_TTL_SECONDS", 15 * 60),
     jobAttempts: readNumberEnv("UPLOAD_JOB_ATTEMPTS", 168),
     // Upper bound on jobs processed in parallel. The worker also enforces at
-    // most one job per app_id, so effective parallelism = min(this, #apps with
-    // pending jobs). Bump if you have more than a few apps.
+    // most one job per ad account (act_id), so effective parallelism =
+    // min(this, #ad accounts with pending jobs). Bump if you upload to more.
     workerConcurrency: readNumberEnv("UPLOAD_WORKER_CONCURRENCY", 4),
     workerRateLimitMax: readNumberEnv("UPLOAD_WORKER_RATE_LIMIT_MAX", 1),
     workerRateLimitDurationMs: readNumberEnv(

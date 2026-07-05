@@ -174,19 +174,6 @@ export async function deleteFbToken(tokenId: string): Promise<boolean> {
   return removed > 0;
 }
 
-// Returns a token's app_id (stored in plaintext) without decrypting the token —
-// used by the worker to group jobs by app for per-app concurrency/throttling.
-export async function getFbTokenAppId(
-  tokenId: string
-): Promise<string | null> {
-  const raw = await getRedis().hget(TOKENS_KEY, tokenId.trim());
-  if (!raw) {
-    return null;
-  }
-  const stored = parseStored(raw);
-  return stored?.appId ?? null;
-}
-
 function toSummary(stored: StoredFbToken): FbTokenSummary {
   return {
     id: stored.id,
