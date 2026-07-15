@@ -28,6 +28,10 @@ const ALGORITHM = "aes-256-gcm";
 const KEY_LENGTH = 32; // AES-256
 const IV_LENGTH = 12; // GCM standard nonce
 // Stable salt so the same passphrase always derives the same key across restarts.
+// MUST NOT change — same stakes as TOKENS_KEY above. The old product name in
+// this string is load-bearing, not leftover cruft: it feeds key derivation, so
+// "tidying" it to match the current name silently makes every stored token
+// undecryptable. Both constants outlive the rename on purpose.
 const SCRYPT_SALT = "fb-audience-uploader:token-store:v1";
 
 export interface FbTokenSummary {
