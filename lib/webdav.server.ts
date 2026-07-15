@@ -249,6 +249,39 @@ export async function fetchWebDavFileRange(
   return response.arrayBuffer();
 }
 
+// One-shot read of a whole NAS file into memory. Images upload single-shot
+// (no chunking/resume — see plan scope decisions), so unlike
+// fetchWebDavFileRange this has no Range header; the caller (uploadAdImage)
+// hands the full buffer straight to Meta's multipart POST.
+export async function fetchWebDavFileBuffer(
+  requestedPath: string
+): Promise<{ buffer: ArrayBuffer; contentType: string | null }> {
+  const normalizedPath = normalizeWebDavPath(requestedPath);
+
+  const response = await resilientFetch(
+    buildWebDavUrl(normalizedPath, false),
+    {
+      method: "GET",
+      headers: {
+        ...getWebDavAuthHeaders(),
+        // Force uncompressed: Cloudflare/Brotli on-the-fly would otherwise
+        // alter the byte content Meta receives.
+        "Accept-Encoding": "identity",
+      },
+    },
+    { label: "webdav-file" }
+  );
+
+  if (!response.ok) {
+    throw new Error(`WebDAV file read failed (${response.status})`);
+  }
+
+  return {
+    buffer: await response.arrayBuffer(),
+    contentType: response.headers.get("content-type") ?? null,
+  };
+}
+
 export async function deleteWebDavFile(requestedPath: string): Promise<void> {
   const normalizedPath = normalizeWebDavPath(requestedPath);
   const response = await fetch(buildWebDavUrl(normalizedPath, false), {

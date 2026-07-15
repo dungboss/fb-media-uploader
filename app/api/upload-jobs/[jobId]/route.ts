@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 
 import { getClientSafeError } from "@/app/api/audiences/meta";
 import {
-  cancelAudienceUploadJob,
-  deleteAudienceUploadJob,
-  getAudienceUploadJob,
-} from "@/lib/audience-upload/jobs";
-import { removeAudienceUploadJob } from "@/lib/audience-upload/queue";
+  cancelMediaUploadJob,
+  deleteMediaUploadJob,
+  getMediaUploadJob,
+} from "@/lib/media-upload/jobs";
+import { removeMediaUploadJob } from "@/lib/media-upload/queue";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export async function GET(
 ) {
   try {
     const { jobId } = await params;
-    const job = await getAudienceUploadJob(jobId);
+    const job = await getMediaUploadJob(jobId);
 
     return NextResponse.json({ job });
   } catch (error) {
@@ -45,18 +45,18 @@ export async function DELETE(
 ) {
   try {
     const { jobId } = await params;
-    const existing = await getAudienceUploadJob(jobId);
+    const existing = await getMediaUploadJob(jobId);
 
     // Active job → cancel (worker stops cooperatively, queue entry removed).
     if (existing.status === "queued" || existing.status === "processing") {
-      const job = await cancelAudienceUploadJob(jobId);
-      await removeAudienceUploadJob(jobId);
+      const job = await cancelMediaUploadJob(jobId);
+      await removeMediaUploadJob(jobId);
       return NextResponse.json({ job });
     }
 
     // Terminal job (failed/completed/cancelled) → remove it from the list.
-    await removeAudienceUploadJob(jobId).catch(() => {});
-    const result = await deleteAudienceUploadJob(jobId);
+    await removeMediaUploadJob(jobId).catch(() => {});
+    const result = await deleteMediaUploadJob(jobId);
     return NextResponse.json(result);
   } catch (error) {
     const safeError = getClientSafeError(

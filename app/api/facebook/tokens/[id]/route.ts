@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getClientSafeError } from "@/app/api/audiences/meta";
-import { deleteFbToken } from "@/lib/audience-upload/token-store";
+import { deleteFbToken } from "@/lib/media-upload/token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

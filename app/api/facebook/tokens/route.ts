@@ -5,7 +5,7 @@ import {
   hasEnvAccessToken,
   listAdAccounts,
 } from "@/app/api/audiences/meta";
-import { addFbToken, listFbTokens } from "@/lib/audience-upload/token-store";
+import { addFbToken, listFbTokens } from "@/lib/media-upload/token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

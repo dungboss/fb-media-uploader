@@ -19,6 +19,10 @@ import { getRedis } from "./redis";
 // app_id + app_secret are captured per token so server calls can attach an
 // `appsecret_proof` (required when the Meta app enables "Require app secret").
 
+// MUST NOT change — the user has real encrypted tokens stored under this key
+// today. Renaming it (even implicitly via a prefix refactor) orphans them
+// with no migration path; the only recovery would be re-adding tokens by
+// hand. See plan.md's rate-limit/scope-decisions table ("Redis" row).
 const TOKENS_KEY = "audience-upload:fb-tokens";
 const ALGORITHM = "aes-256-gcm";
 const KEY_LENGTH = 32; // AES-256

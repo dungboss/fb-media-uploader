@@ -1,21 +1,21 @@
 import IORedis from "ioredis";
 
-import { getAudienceUploadConfig } from "./env";
+import { getMediaUploadConfig } from "./env";
 
 declare global {
-  var __audienceUploadRedis__: IORedis | undefined;
+  var __mediaUploadRedis__: IORedis | undefined;
 }
 
 export function getRedis() {
-  if (!globalThis.__audienceUploadRedis__) {
-    globalThis.__audienceUploadRedis__ = createRedisConnection();
+  if (!globalThis.__mediaUploadRedis__) {
+    globalThis.__mediaUploadRedis__ = createRedisConnection();
   }
 
-  return globalThis.__audienceUploadRedis__;
+  return globalThis.__mediaUploadRedis__;
 }
 
 export function createRedisConnection() {
-  const { redisUrl } = getAudienceUploadConfig();
+  const { redisUrl } = getMediaUploadConfig();
 
   return new IORedis(redisUrl, {
     maxRetriesPerRequest: null,
@@ -24,7 +24,7 @@ export function createRedisConnection() {
 }
 
 export function getBullConnectionOptions() {
-  const { redisUrl } = getAudienceUploadConfig();
+  const { redisUrl } = getMediaUploadConfig();
   const redisUrlObject = new URL(redisUrl);
   const databasePath = redisUrlObject.pathname.replace(/^\//, "");
   const database =

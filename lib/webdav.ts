@@ -1,12 +1,6 @@
+import { resolveMediaType } from "@/lib/media-upload/media-type";
+
 export const WEB_DAV_ROOT_PATH = "/";
-
-const WEB_DAV_SUPPORTED_UPLOAD_MIME_TYPES = new Set([
-  "text/csv",
-  "text/plain",
-  "application/vnd.ms-excel",
-]);
-
-const WEB_DAV_SUPPORTED_UPLOAD_EXTENSIONS = new Set([".csv", ".txt"]);
 
 export type WebDavDirectoryEntry = {
   path: string;
@@ -134,15 +128,6 @@ export const getWebDavEntryTypeLabel = (entry: WebDavDirectoryEntry) => {
     return "Folder";
   }
 
-  const normalizedMimeType = entry.mimeType?.split(";")[0]?.trim().toLowerCase() ?? "";
-  if (normalizedMimeType === "text/csv" || normalizedMimeType === "application/vnd.ms-excel") {
-    return "CSV";
-  }
-
-  if (normalizedMimeType === "text/plain") {
-    return "TXT";
-  }
-
   const extension = entry.name.includes(".") ? entry.name.split(".").at(-1) : "";
   if (extension) {
     return extension.toUpperCase();
@@ -151,21 +136,9 @@ export const getWebDavEntryTypeLabel = (entry: WebDavDirectoryEntry) => {
   return "File";
 };
 
+// Delegates to the shared image-type resolver so the NAS browser's "what can
+// be uploaded" rule stays in one place (lib/media-upload/media-type.ts).
+// Export name kept as-is — the NAS dialog imports it by this name.
 export const isSupportedWebDavUploadFile = (
   entry: Pick<WebDavDirectoryEntry, "name" | "mimeType" | "isDirectory">
-) => {
-  if (entry.isDirectory) {
-    return false;
-  }
-
-  const normalizedMimeType = entry.mimeType?.split(";")[0]?.trim().toLowerCase() ?? "";
-  if (WEB_DAV_SUPPORTED_UPLOAD_MIME_TYPES.has(normalizedMimeType)) {
-    return true;
-  }
-
-  const extension = entry.name.includes(".")
-    ? `.${entry.name.split(".").at(-1)?.toLowerCase() ?? ""}`
-    : "";
-
-  return WEB_DAV_SUPPORTED_UPLOAD_EXTENSIONS.has(extension);
-};
+) => !entry.isDirectory && resolveMediaType(entry) !== null;

@@ -3,8 +3,8 @@ import { createHmac } from "node:crypto";
 import {
   FacebookApiError,
   type MetaApiErrorPayload,
-} from "@/lib/audience-upload/facebook-error";
-import { getFbTokenCredentials } from "@/lib/audience-upload/token-store";
+} from "@/lib/media-upload/facebook-error";
+import { getFbTokenCredentials } from "@/lib/media-upload/token-store";
 import { resilientFetch } from "@/lib/resilient-fetch";
 
 // Re-exported so existing `import { FacebookApiError } from "@/app/api/audiences/meta"`
