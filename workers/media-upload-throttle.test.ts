@@ -12,7 +12,7 @@
 // separately since they need no live traffic to verify).
 
 import { randomUUID } from "node:crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { getRedis } from "../lib/media-upload/redis";
 import { acquireThrottleSlot } from "./media-upload-throttle";
@@ -34,6 +34,32 @@ const TOTAL_ACQUISITIONS = CONCURRENT_WAITERS * ACQUISITIONS_PER_WAITER;
 describe("acquireThrottleSlot — real Redis, N concurrent acquirers", () => {
   const accountKey = `test-throttle:${randomUUID()}`;
   const throttleKey = `media-upload:meta-request-throttle:${accountKey}`;
+
+  // Fail fast and honestly when Redis is simply not running. Without this the
+  // suite hangs and reports a *timeout* on the throttle assertion — which reads
+  // as "the mutex is broken" when the real cause is an unreachable dependency.
+  //
+  // The ping must be raced against a timer rather than awaited: the shared
+  // client sets `maxRetriesPerRequest: null` (BullMQ requires it), so commands
+  // queue forever waiting for a connection instead of rejecting. A plain
+  // `await ping()` would hang, not throw.
+  beforeAll(async () => {
+    const reachable = await Promise.race([
+      getRedis()
+        .ping()
+        .then(() => true)
+        .catch(() => false),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000)),
+    ]);
+
+    if (!reachable) {
+      throw new Error(
+        `Redis unreachable at ${process.env.REDIS_URL ?? "redis://localhost:6379"}. ` +
+          `This test needs real Redis — it proves the SET NX PX mutex holds under ` +
+          `concurrency, which cannot be faked. Start Redis and re-run.`
+      );
+    }
+  }, 5_000);
 
   afterAll(async () => {
     await getRedis().del(throttleKey);

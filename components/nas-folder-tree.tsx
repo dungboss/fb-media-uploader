@@ -9,7 +9,6 @@ import type { WebDavFolderTreeRow } from "@/hooks/use-webdav-folder-tree";
 type NasFolderTreeProps = {
   rows: WebDavFolderTreeRow[];
   isBusy?: boolean;
-  rootLabel: string;
   onSelect: (path: string) => void;
   onToggle: (path: string) => void;
 };
@@ -17,7 +16,6 @@ type NasFolderTreeProps = {
 export function NasFolderTree({
   rows,
   isBusy = false,
-  rootLabel,
   onSelect,
   onToggle,
 }: NasFolderTreeProps) {

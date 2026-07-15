@@ -8,6 +8,7 @@ import {
   Loader2,
   RefreshCcw,
   Search,
+  Upload,
 } from "lucide-react";
 
 import { NasFolderTree } from "@/components/nas-folder-tree";
@@ -54,6 +55,10 @@ type NasFileBrowserDialogProps = {
   onClose: () => void;
   onCurrentPathChange?: (path: string) => void;
   onSelectFile: (selection: NasFileSelection) => void;
+  // Primary folder-mode action (plan.md: "pick a NAS folder → the server
+  // enumerates it", not 5000 checkboxes). Optional so callers that only need
+  // single-file selection are unaffected.
+  onSelectFolder?: (nasFolderPath: string, imageCount: number) => void;
   rootLabel?: string;
 };
 
@@ -63,6 +68,7 @@ export function NasFileBrowserDialog({
   onClose,
   onCurrentPathChange,
   onSelectFile,
+  onSelectFolder,
   rootLabel = "NAS",
 }: NasFileBrowserDialogProps) {
   const {
@@ -107,6 +113,14 @@ export function NasFileBrowserDialog({
     const files = (currentDirectory?.files ?? []).filter(isSupportedWebDavUploadFile);
     return [...folders, ...files];
   }, [currentDirectory]);
+
+  // Count of uploadable images directly in the current directory (Depth:1,
+  // no recursion — matches the server's PROPFIND enumeration) so the primary
+  // folder action can show "N ảnh" before the user commits.
+  const currentFolderImageCount = useMemo(
+    () => (currentDirectory?.files ?? []).filter(isSupportedWebDavUploadFile).length,
+    [currentDirectory]
+  );
 
   const visibleEntries = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -160,6 +174,15 @@ export function NasFileBrowserDialog({
     onClose();
   }
 
+  function handleSelectCurrentFolder() {
+    if (!onSelectFolder || currentFolderImageCount === 0) {
+      return;
+    }
+
+    onSelectFolder(currentPath, currentFolderImageCount);
+    onClose();
+  }
+
   return (
     <Dialog
       open={isOpen}
@@ -203,7 +226,6 @@ export function NasFileBrowserDialog({
               <NasFolderTree
                 rows={treeRows}
                 isBusy={isBusy}
-                rootLabel={rootLabel}
                 onSelect={handleNavigatePath}
                 onToggle={toggleExpanded}
               />
@@ -223,6 +245,22 @@ export function NasFileBrowserDialog({
                 </div>
 
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  {onSelectFolder ? (
+                    <Button
+                      type="button"
+                      onClick={handleSelectCurrentFolder}
+                      disabled={isBusy || isCurrentDirectoryLoading || currentFolderImageCount === 0}
+                      title={
+                        currentFolderImageCount === 0
+                          ? "Thư mục này chưa có ảnh (.jpg .jpeg .png .gif)"
+                          : undefined
+                      }
+                    >
+                      <Upload className="size-4" />
+                      Upload toàn bộ thư mục này ({currentFolderImageCount} ảnh)
+                    </Button>
+                  ) : null}
+
                   <Button
                     type="button"
                     variant="outline"
