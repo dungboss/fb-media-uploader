@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  getClientSafeError,
-  hasEnvAccessToken,
-  listAdAccounts,
-} from "@/app/api/audiences/meta";
+import { hasEnvAccessToken, listAdAccounts } from "@/lib/media-upload/meta-ad-accounts";
+import { getClientSafeError } from "@/lib/media-upload/meta-graph";
 import { addFbToken, listFbTokens } from "@/lib/media-upload/token-store";
 
 export const dynamic = "force-dynamic";

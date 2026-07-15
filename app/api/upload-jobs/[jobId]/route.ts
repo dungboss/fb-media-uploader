@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { getClientSafeError } from "@/app/api/audiences/meta";
 import {
   cancelMediaUploadJob,
   deleteMediaUploadJob,
   getMediaUploadJob,
 } from "@/lib/media-upload/jobs";
+import { getClientSafeError } from "@/lib/media-upload/meta-graph";
 import { removeMediaUploadJob } from "@/lib/media-upload/queue";
 
 export const dynamic = "force-dynamic";

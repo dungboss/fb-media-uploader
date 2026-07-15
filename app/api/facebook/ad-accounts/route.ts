@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  getClientSafeError,
-  getDefaultAdAccountId,
-  listAdAccounts,
-} from "@/app/api/audiences/meta";
+import { getDefaultAdAccountId, listAdAccounts } from "@/lib/media-upload/meta-ad-accounts";
+import { getClientSafeError } from "@/lib/media-upload/meta-graph";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

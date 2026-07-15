@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getClientSafeError } from "@/app/api/audiences/meta";
+import { getClientSafeError } from "@/lib/media-upload/meta-graph";
 import { deleteFbToken } from "@/lib/media-upload/token-store";
 
 export const dynamic = "force-dynamic";
