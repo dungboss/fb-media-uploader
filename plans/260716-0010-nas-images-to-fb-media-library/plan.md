@@ -193,12 +193,26 @@ the create call.
    Also wrong in the report: **delete is `DELETE act_X/adimages?hash=<hash>`** →
    `{"success":true}`. Not `DELETE /{hash}`. Verified.
 
-2. **`call_count` units — strong evidence for PERCENTAGE, not settled.** After 2
-   writes (POST + DELETE) on a fresh account, `call_count` was still `0`. An
-   absolute counter would read `2`; a percentage of the ~300/hr dev quota reads
-   `0.67 → 0`. Treat as percentage, keep the field named `callCount`, keep the
-   brake fail-safe (early brake = slow, never wrong). Phase 02 step 1b's counted
-   burst can still confirm.
+2. ~~**`call_count` units — strong evidence for PERCENTAGE**~~ **RESOLVED
+   2026-07-16 — it is an ABSOLUTE COUNT. The percentage inference was wrong.**
+   A counted burst showed `call_count` tracking calls 1:1 (`1` after one call,
+   `2` after two). The earlier `0`-after-2-writes reading that suggested a
+   percentage was **reporting lag**, not rounding — the counter simply hadn't
+   caught up yet.
+
+   Consequence for the brake (`callCount >= 90`): it fires at **90 calls**, i.e.
+   ~30% of the ~300/hr dev quota — not at 90%. Conservative, never wrong: it
+   brakes early and slowly, exactly the fail-safe the design asked for. Left as
+   is deliberately. Anyone retuning it must know the unit is calls, not percent.
+
+3. **Lesson recorded: unit-green ≠ working.** The throttle key bug (`d261a55`)
+   survived 38 passing tests, four green build gates, and three review passes.
+   `resolveAccountKey` was right on its own; `getUsage` was right on its own; the
+   defect lived only in the join, which no test crossed — and `logUsageProgress`
+   swallowed the one signal that would have shown it (`if (!usage) return`). Only
+   an end-to-end run against real Meta caught it, by a timing smell: 3 images in
+   ~3s where dev-tier pacing implies ~30s. **Any future pacing/usage change gets
+   an e2e run, not just a green suite.**
 3. **Gate removal → 429 storm** — the Redis `SET NX PX` throttle must hold under
    4 concurrent workers on one account. Phase 03 proves it before merge.
 4. **Dev-tier drain ≈ 21h** — the 24h job TTL would expire still-queued jobs
