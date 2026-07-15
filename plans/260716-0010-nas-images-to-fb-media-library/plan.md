@@ -173,15 +173,32 @@ the create call.
 
 ## Key risks (detail per phase)
 
-1. **`adimages` POST response shape still unverified.** The probe's `GET
-   act_X/adimages` returned flat `{hash,name,width,height,id}` under `data[]` —
-   that is the **read** edge and says nothing about the **POST** response. Phase
-   02 step 1 (`curl -D -` on the real POST) remains a hard gate; the tolerant
-   parser and its both-shapes tests stay. Do not weaken this on the read hint.
-2. **`call_count` units unconfirmed** — percentage (per docs) or absolute count?
-   `call_count: 0` on fresh accounts is consistent with both. Phase 02 step 1
-   disambiguates with a counted burst. The brake is designed to fail safe either
-   way (early brake = slow, not broken).
+1. ~~**`adimages` POST response shape still unverified.**~~ **RESOLVED 2026-07-16
+   by a real POST** (test image → Miho 5 → deleted). **The response is NESTED and
+   the research report was wrong:**
+
+   ```json
+   {"images":{"<field_name>":{"hash":"2dd5a641…","height":600,"width":600,
+     "url":"…","url_128":"…","url_256":"…","url_256_height":"260",
+     "url_256_width":"260","name":"<field_name>"}}}
+   ```
+
+   **The key inside `images{}` is the multipart FIELD NAME the client chose** (we
+   sent `probe-test-image.png` and got that key back). The parser must read the
+   first/only entry, never hard-code a field name. The read edge's flat
+   `data[{hash,name,width,height,id}]` was indeed no evidence for the write edge —
+   they differ, exactly as feared. Keep the tolerant parser: the both-shapes test
+   is now a regression guard, not a hedge.
+
+   Also wrong in the report: **delete is `DELETE act_X/adimages?hash=<hash>`** →
+   `{"success":true}`. Not `DELETE /{hash}`. Verified.
+
+2. **`call_count` units — strong evidence for PERCENTAGE, not settled.** After 2
+   writes (POST + DELETE) on a fresh account, `call_count` was still `0`. An
+   absolute counter would read `2`; a percentage of the ~300/hr dev quota reads
+   `0.67 → 0`. Treat as percentage, keep the field named `callCount`, keep the
+   brake fail-safe (early brake = slow, never wrong). Phase 02 step 1b's counted
+   burst can still confirm.
 3. **Gate removal → 429 storm** — the Redis `SET NX PX` throttle must hold under
    4 concurrent workers on one account. Phase 03 proves it before merge.
 4. **Dev-tier drain ≈ 21h** — the 24h job TTL would expire still-queued jobs
