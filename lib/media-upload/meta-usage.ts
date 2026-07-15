@@ -67,7 +67,11 @@ export function parseUsageHeaders(headers: Headers): Map<string, MetaUsage> {
 // just the one it targeted.
 export function recordUsageFromHeaders(headers: Headers): void {
   for (const [accountKey, usage] of parseUsageHeaders(headers)) {
-    usageStore.set(accountKey, usage);
+    // Normalize on write too, not just on read: today Meta keys these by bare
+    // id so this is a no-op, but the store's whole contract is "one entry per
+    // bare id". Relying on the header's format to hold that invariant makes a
+    // future format change a silent miss rather than an error.
+    usageStore.set(normalizeAccountKey(accountKey), usage);
   }
 }
 
@@ -106,8 +110,13 @@ function normalizeTier(value: string | undefined): MetaAccessTier {
   return value === "development_access" || value === "standard_access" ? value : "unknown";
 }
 
+// Reduces any caller's key form to the bare id the BUC header uses. Strips
+// REPEATED prefixes on purpose: a caller that prefixes an already-prefixed id
+// produces "act:act_<id>", and stripping only one leading prefix leaves
+// "act_<id>" — a silent lookup miss with no error anywhere. Defence in depth;
+// resolveAccountKey no longer builds such keys.
 function normalizeAccountKey(rawKey: string): string {
-  return rawKey.trim().replace(/^act[_:]/, "");
+  return rawKey.trim().replace(/^(?:act[_:])+/, "");
 }
 
 function readUsageHeader(headers: Headers): string | null {

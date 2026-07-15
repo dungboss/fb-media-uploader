@@ -34,10 +34,18 @@ const TIER_INTERVAL_MS: Record<MetaAccessTier, number> = {
 };
 
 // Throttle bucket for a job: ad account id, else token id, else a shared
-// default. No gate role anymore (removed — see header) — this only keys
-// the Redis throttle below.
+// default. Also the key handed to getUsage(), so it MUST reduce to the bare
+// id Meta's BUC header is keyed by.
+//
+// Strip any existing act_/act: before prefixing: batch.adAccountId arrives as
+// "act_<id>", so a blind `act:${account}` yields "act:act_<id>", which
+// normalizeAccountKey (one prefix only) reduces to "act_<id>" and never
+// matches the stored bare "<id>". That miss is silent — getUsage returns null,
+// the tier stays "unknown", and the interval sits at the 1s unknown-tier
+// default instead of dev tier's 15s. Caught end-to-end, not by unit tests;
+// media-upload-usage-key.test.ts now pins the round trip.
 export function resolveAccountKey(adAccountId: string | null, tokenId: string | null): string {
-  const account = adAccountId?.trim();
+  const account = adAccountId?.trim().replace(/^(?:act[_:])+/, "");
   if (account) return `act:${account}`;
   const token = tokenId?.trim();
   return token ? `token:${token}` : "default";
