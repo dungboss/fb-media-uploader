@@ -59,13 +59,12 @@ const REDIS_DOWN_PATTERNS =
 // This matters because describeRedisError's output is CLIENT-VISIBLE:
 // getClientSafeError (lib/media-upload/meta-graph.ts) puts it in the response
 // body of every route, so whatever is interpolated here reaches the browser.
-// Locally that is `redis://localhost:6379` and harmless. On Render the URL
-// comes from the Key Value service's connectionString: the default internal URL
-// carries no credentials ("the default internal connection URL doesn't include
-// a username or password" — Render docs), but enabling auth on the instance
-// adds `default:<password>@`, and the raw URL would then put that password in
-// an HTTP response. Redact unconditionally rather than depend on that default
-// holding.
+// On the deployment this app targets (one VPS, Redis bound to localhost) the
+// URL is `redis://localhost:6379` and harmless — which is exactly why the leak
+// would go unnoticed until it mattered. Put a password on Redis, or move to a
+// managed instance whose connection string carries `user:password@`, and the
+// raw URL here would serve that password in an HTTP response body. Redact
+// unconditionally rather than depend on the URL staying credential-free.
 //
 // An unparseable URL is replaced entirely, never echoed — if we cannot find the
 // credentials we cannot prove there are none.
