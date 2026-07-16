@@ -94,7 +94,7 @@ async function main() {
     console.log(green(`  ✓ Redis đang chạy ở ${host}:${port}`));
   } else {
     console.log(red(`  ✗ Redis KHÔNG chạy ở ${host}:${port}`));
-    console.log("    Chạy: " + bold("docker compose up -d"));
+    console.log("    Bật Redis bằng DBngin, hoặc: " + bold("brew services start redis"));
     console.log("    (Không có Redis, dashboard sẽ treo ở \"Đang tải token...\")");
   }
 
@@ -108,7 +108,7 @@ async function main() {
 
   console.log("");
   console.log(bold("  Tiếp theo:"));
-  if (!redisUp) console.log("    1. docker compose up -d");
+  if (!redisUp) console.log("    1. bật Redis (DBngin / brew services start redis)");
   console.log(`    ${!redisUp ? "2" : "1"}. npm run dev:all      ` + "# chạy CẢ web lẫn worker");
   console.log(`    ${!redisUp ? "3" : "2"}. mở http://localhost:3000 → thêm token Facebook`);
   console.log("");

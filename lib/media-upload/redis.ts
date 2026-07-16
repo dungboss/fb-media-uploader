@@ -61,7 +61,7 @@ export function describeRedisError(error: unknown): string {
   }
 
   const { redisUrl } = getMediaUploadConfig();
-  return `Không kết nối được Redis ở ${redisUrl} — Redis chưa chạy? Chạy \`docker compose up -d\` rồi thử lại (xem README).`;
+  return `Không kết nối được Redis ở ${redisUrl} — Redis chưa chạy? Khởi động Redis (DBngin hoặc \`brew services start redis\`) rồi thử lại (xem README).`;
 }
 
 export function getBullConnectionOptions() {

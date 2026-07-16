@@ -7,11 +7,10 @@ job per image, batch progress in the dashboard. **Images only:** `.jpg .jpeg
 
 ## Getting Started
 
-Four commands from a fresh clone:
+Three commands from a fresh clone, once Redis is running (see below):
 
 ```bash
 npm install
-docker compose up -d   # Redis on :6379 — the one thing npm can't install
 npm run setup          # writes .env, generates TOKEN_ENCRYPTION_KEY, checks Redis
 npm run dev:all        # web + worker together
 ```
@@ -23,8 +22,33 @@ token from the dashboard (see [Access tokens](#access-tokens)).
 cannot fill in for you is the NAS login — put `WEBDAV_USERNAME` and
 `WEBDAV_PASSWORD` in `.env` yourself.
 
-Already have Redis on `:6379` (DBngin, Homebrew, an existing container)? Skip
-`docker compose up -d` — `npm run setup` detects it and says so.
+### Redis
+
+Redis on `:6379` is the one dependency npm cannot install for you. It holds
+your encrypted Facebook tokens and the job queue; the app is useless without
+it. `npm run setup` checks whether it is up and says so either way.
+
+Install it whichever way suits you:
+
+- **[DBngin](https://dbngin.com)** — free GUI, click to start Redis 7. It stops
+  when the Mac sleeps, so restart it from the menu bar if the dashboard goes
+  quiet.
+- **Homebrew** — `brew install redis && brew services start redis`
+
+Defaults are fine. This app needs `maxmemory-policy noeviction` (Redis's own
+default) because Redis here is a token store and job queue, not a cache — under
+an `allkeys-lru` policy it would silently delete queued jobs and saved tokens.
+Turn on `appendonly yes` if you want tokens to survive a Redis restart.
+
+**Run exactly one Redis on `:6379`.** Two can both bind that port on macOS — a
+wildcard `*:6379` bind and a specific `127.0.0.1:6379` bind coexist happily, and
+the specific one silently wins. No port-in-use error, no warning; the app just
+starts talking to the other Redis and every saved token looks like it vanished.
+If your tokens disappear all at once, this is why. Check with:
+
+```bash
+lsof -nP -iTCP:6379 -sTCP:LISTEN   # expect exactly one process
+```
 
 ### Run it with `dev:all`, not `dev`
 
@@ -39,16 +63,15 @@ do run them separately, run **exactly one** worker (see
 
 ### If something hangs or looks empty
 
-Redis is almost always the answer. It holds your encrypted Facebook tokens and
-the job queue, and the app is useless without it. When it is not running, every
-API route now fails in about a second with:
+Redis is almost always the answer. When it is not running, every API route now
+fails in about a second with:
 
-> Không kết nối được Redis ở redis://localhost:6379 — Redis chưa chạy? Chạy
-> `docker compose up -d` rồi thử lại.
+> Không kết nối được Redis ở redis://localhost:6379 — Redis chưa chạy? Khởi
+> động Redis (DBngin hoặc `brew services start redis`) rồi thử lại.
 
-`docker compose down` stops Redis but keeps your data. `docker compose down -v`
-also deletes the volume — **that wipes every Facebook token you added**, and
-they cannot be recovered.
+If Redis **is** running and the dashboard still shows no tokens, you are
+probably talking to a *second* Redis — see the port-collision warning under
+[Redis](#redis).
 
 ## Access tokens
 
@@ -214,7 +237,7 @@ table.
 | `UPLOAD_JOB_TTL_SECONDS` | no | `604800` (7d) | **Must exceed the longest expected drain.** A dev-tier 5000-image batch takes ~21h; queued jobs sit untouched while waiting, so a 24h TTL would expire them mid-drain. Raised from 24h for exactly this reason |
 | `UPLOAD_JOB_ATTEMPTS` | no | `10` | Retry attempts per job before it's marked failed |
 | `UPLOAD_WORKER_CONCURRENCY` | no | `4` | Jobs processed in parallel **within the one worker process**. No longer tied to ad-account count (the per-account gate is gone) |
-| `UPLOAD_WORKER_RATE_LIMIT_MAX` / `UPLOAD_WORKER_RATE_LIMIT_DURATION_MS` | no | `1` / `1000` | BullMQ's own global rate limiter (queue-level safety net, separate from Meta rate limiting via 429 backoff) |
+| `UPLOAD_WORKER_RATE_LIMIT_MAX` / `UPLOAD_WORKER_RATE_LIMIT_DURATION_MS` | no | `10000` / `1000` | BullMQ's own global rate limiter (queue-level safety net, separate from Meta rate limiting via 429 backoff). Effectively off by default — set it low and you re-introduce a hard cap on burst mode |
 | `UPLOAD_META_RATE_LIMIT_DELAY_MS` | no | `300000` (5m) | **Fallback only** — used when Meta's response carries no usage header to derive a wait from |
 | `UPLOAD_MAX_FILE_BYTES` | no | `104857600` (100MB) | **OOM guard, not Meta's image size limit** (Meta's real limit is undocumented/unknown). Rejects a file before fully reading it into memory |
 | `UPLOAD_MAX_BATCH_FILES` | no | `10000` | Folder-mode batch cap. Explicit multi-file picks are separately capped at 500 |
