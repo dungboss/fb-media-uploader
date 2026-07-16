@@ -54,6 +54,35 @@ const REDIS_CONNECT_TIMEOUT_MS = 5_000;
 const REDIS_DOWN_PATTERNS =
   /Reached the max retries per request|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|Connection is closed|connect timeout|Stream isn't writeable|Command timed out/i;
 
+// Strips any credentials from a Redis URL before it is shown to a human.
+//
+// This matters because describeRedisError's output is CLIENT-VISIBLE:
+// getClientSafeError (lib/media-upload/meta-graph.ts) puts it in the response
+// body of every route, so whatever is interpolated here reaches the browser.
+// Locally that is `redis://localhost:6379` and harmless. On Render the URL
+// comes from the Key Value service's connectionString: the default internal URL
+// carries no credentials ("the default internal connection URL doesn't include
+// a username or password" — Render docs), but enabling auth on the instance
+// adds `default:<password>@`, and the raw URL would then put that password in
+// an HTTP response. Redact unconditionally rather than depend on that default
+// holding.
+//
+// An unparseable URL is replaced entirely, never echoed — if we cannot find the
+// credentials we cannot prove there are none.
+export function redactRedisUrl(redisUrl: string): string {
+  try {
+    const url = new URL(redisUrl);
+    if (!url.username && !url.password) {
+      return redisUrl;
+    }
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return "(REDIS_URL không hợp lệ)";
+  }
+}
+
 export function describeRedisError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (!REDIS_DOWN_PATTERNS.test(message)) {
@@ -61,7 +90,16 @@ export function describeRedisError(error: unknown): string {
   }
 
   const { redisUrl } = getMediaUploadConfig();
-  return `Không kết nối được Redis ở ${redisUrl} — Redis chưa chạy? Khởi động Redis (DBngin hoặc \`brew services start redis\`) rồi thử lại (xem README).`;
+  // The fix differs by environment: locally you start Redis yourself; on Render
+  // the Key Value service is managed and the usual cause is a region/URL
+  // mismatch. Telling a Render operator to run `brew services start redis`
+  // sends them somewhere with no Redis to start.
+  const hint =
+    process.env.NODE_ENV === "production"
+      ? "Kiểm tra service Key Value trên Render: cùng region với web/worker, và REDIS_URL đã được inject chưa"
+      : "Khởi động Redis (DBngin hoặc `brew services start redis`)";
+
+  return `Không kết nối được Redis ở ${redactRedisUrl(redisUrl)} — ${hint} rồi thử lại (xem README).`;
 }
 
 export function getBullConnectionOptions() {
