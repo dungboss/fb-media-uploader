@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:all": "concurrently --names web,worker --prefix-colors cyan,magenta --kill-others-on-fail \"npm:dev\" \"npm:worker:media\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -32,6 +33,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
