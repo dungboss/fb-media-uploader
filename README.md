@@ -7,19 +7,48 @@ job per image, batch progress in the dashboard. **Images only:** `.jpg .jpeg
 
 ## Getting Started
 
+Four commands from a fresh clone:
+
 ```bash
 npm install
-npm run dev
+docker compose up -d   # Redis on :6379 — the one thing npm can't install
+npm run setup          # writes .env, generates TOKEN_ENCRYPTION_KEY, checks Redis
+npm run dev:all        # web + worker together
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Set `REDIS_URL` and
-`TOKEN_ENCRYPTION_KEY` in `.env` first (see [Environment variables](#environment-variables)),
-then run the worker in a **separate process** (exactly one — see
-[Pacing & the single-worker-process requirement](#pacing--the-single-worker-process-requirement)):
+Then open [http://localhost:3000](http://localhost:3000) and add a Facebook
+token from the dashboard (see [Access tokens](#access-tokens)).
 
-```bash
-npm run worker:media
-```
+`npm run setup` will tell you if anything is still missing. The one thing it
+cannot fill in for you is the NAS login — put `WEBDAV_USERNAME` and
+`WEBDAV_PASSWORD` in `.env` yourself.
+
+Already have Redis on `:6379` (DBngin, Homebrew, an existing container)? Skip
+`docker compose up -d` — `npm run setup` detects it and says so.
+
+### Run it with `dev:all`, not `dev`
+
+This app is **two processes**. `npm run dev` serves the dashboard, which only
+*enqueues* jobs; `npm run worker:media` is what actually uploads to Meta. Run
+the dashboard alone and your batch sits at "Đang tính ước tính..." forever,
+with no error and no hint — the jobs are queued and nobody is working them.
+
+`npm run dev:all` runs both with `[web]`/`[worker]` labels. Prefer it. If you
+do run them separately, run **exactly one** worker (see
+[Pacing](#pacing--the-single-worker-process-requirement)).
+
+### If something hangs or looks empty
+
+Redis is almost always the answer. It holds your encrypted Facebook tokens and
+the job queue, and the app is useless without it. When it is not running, every
+API route now fails in about a second with:
+
+> Không kết nối được Redis ở redis://localhost:6379 — Redis chưa chạy? Chạy
+> `docker compose up -d` rồi thử lại.
+
+`docker compose down` stops Redis but keeps your data. `docker compose down -v`
+also deletes the volume — **that wipes every Facebook token you added**, and
+they cannot be recovered.
 
 ## Access tokens
 

@@ -12,6 +12,7 @@ import { resilientFetch } from "@/lib/resilient-fetch";
 import { FacebookApiError, type MetaApiErrorPayload } from "./facebook-error";
 import { formatMetaErrorMessage, hasMetaError } from "./meta-error-messages";
 import { getUsage, recordUsageFromHeaders } from "./meta-usage";
+import { describeRedisError } from "./redis";
 import {
   computeAppSecretProof,
   type FacebookCredentials,
@@ -44,7 +45,12 @@ export function getClientSafeError(
 
   if (error instanceof Error) {
     return {
-      message: error.message || fallbackMessage,
+      // Redis being down surfaces here as a raw ioredis message
+      // ("connect ECONNREFUSED 127.0.0.1:6379") that means nothing to the
+      // person looking at the dashboard. Every route funnels through this
+      // function, so translating once here covers all of them — the
+      // alternative was the same rewrite in 12 route handlers.
+      message: describeRedisError(error) || fallbackMessage,
       status: 500,
     };
   }

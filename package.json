@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "setup": "node scripts/setup-local-env.mjs",
     "dev": "next dev",
     "dev:all": "concurrently --names web,worker --prefix-colors cyan,magenta --kill-others-on-fail \"npm:dev\" \"npm:worker:media\"",
     "build": "next build",
