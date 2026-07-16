@@ -1,9 +1,10 @@
 # Hướng Dẫn Deploy Lên VPS
 
-> **Chưa được kiểm chứng thực tế.** Guide này viết từ cấu hình đã biết của app,
-> chưa ai chạy hết một lượt trên VPS thật. Các lệnh dưới đây là điểm khởi đầu
-> đáng tin, không phải bản ghi của một lần deploy thành công. Gặp chỗ lệch,
-> sửa file này.
+> **Đã chạy thật.** Bản này là ghi chép của một lần deploy thành công lên
+> Ubuntu 22.04 (2 core / 1.9GB RAM / 16GB đĩa) ngày 2026-07-17, kết thúc bằng
+> HTTPS hợp lệ + Basic Auth trả 401 + NAS gọi được. Ba chỗ trong bản nháp
+> trước **sai**, đã sửa: Redis của Ubuntu quá cũ cho BullMQ, systemd không cần
+> `EnvironmentFile`, và không có tên miền vẫn lấy được chứng chỉ thật.
 
 ## Vì sao VPS, không phải Render
 
@@ -33,9 +34,12 @@ local là $0 và không phải vá OS, không phải lo backup.
 
 ## 1. Chuẩn bị
 
-**Máy:** tối thiểu 2GB RAM. Worker đọc nguyên tấm ảnh vào RAM để POST multipart
-(`UPLOAD_MAX_FILE_BYTES` mặc định 100MB × `UPLOAD_WORKER_CONCURRENCY` 4 = tới
-400MB lúc cao điểm), cộng Next.js và Redis.
+**Máy:** 2GB RAM là sàn, và ở sàn thì phải hạ `UPLOAD_WORKER_CONCURRENCY`.
+Worker đọc nguyên tấm ảnh vào RAM để POST multipart, nên RAM cao điểm ≈
+`UPLOAD_MAX_FILE_BYTES` × concurrency, cộng Next.js và Redis. Mặc định
+(100MB × 4 = 400MB) quá tay cho máy 1.9GB — bản deploy thật đặt **concurrency=2**.
+
+**Đĩa:** `npm ci` + build ăn ~1GB. Cần ít nhất 3GB trống.
 
 **Sinh 2 khoá, lưu vào password manager:**
 
@@ -49,37 +53,76 @@ openssl rand -base64 24   # BASIC_AUTH_PASSWORD
 
 ---
 
-## 2. Cài đặt trên VPS (Ubuntu 24.04)
+## 2. Cài đặt (Ubuntu 22.04)
+
+### Siết bảo mật TRƯỚC
+
+Máy có IP public thì làm hai việc này trước khi đặt mật khẩu NAS lên đó:
 
 ```bash
-# Node 22 LTS
+# Firewall — mở 22 TRƯỚC khi bật, nếu không là tự khoá mình ra ngoài
+sudo apt-get install -y ufw
+sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+sudo ufw --force enable
+
+# Chỉ cho đăng nhập bằng key (đẩy key lên trước: ssh-copy-id root@<ip>)
+sudo tee /etc/ssh/sshd_config.d/zz-hardening.conf <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+EOF
+sudo sshd -t && sudo systemctl reload ssh
+```
+
+Kiểm tra key còn vào được **trước khi đóng phiên đang mở**.
+
+### Node + Redis
+
+```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs redis-server git
-
-# Code
-sudo adduser --system --group --home /opt/fbmedia fbmedia
-sudo -u fbmedia git clone https://github.com/dungboss/fb-media-uploader.git /opt/fbmedia/app
-cd /opt/fbmedia/app
-sudo -u fbmedia npm ci
+sudo apt-get install -y nodejs git
 ```
 
-### Redis — hai thiết lập bắt buộc
+> **Đừng dùng `apt-get install redis-server` của Ubuntu.** Ubuntu 22.04 mang
+> Redis **6.0.16**, còn BullMQ yêu cầu **"Redis `6.2.0` or newer"**
+> (docs.bullmq.io). Cài bản của Ubuntu thì app dựng lên vẫn chạy rồi hỏng lúc
+> chạy thật với lỗi khó lần. Dùng repo chính thức của Redis:
 
-Sửa `/etc/redis/redis.conf`:
+```bash
+curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/redis.list
+sudo apt-get update && sudo apt-get install -y redis
+redis-server --version   # phải >= 6.2
+```
+
+### Redis — ba thiết lập bắt buộc
+
+Thêm vào cuối `/etc/redis/redis.conf` (cuối file thắng mọi giá trị phía trên):
 
 ```
-bind 127.0.0.1 ::1          # KHÔNG mở ra ngoài — Redis này giữ token Facebook
+bind 127.0.0.1 -::1         # KHÔNG mở ra ngoài — Redis này giữ token Facebook
+protected-mode yes
 maxmemory-policy noeviction # KHÔNG dùng allkeys-lru
 appendonly yes              # token phải sống sót qua restart
 ```
 
-`noeviction` là mặc định của Redis — đừng đổi. Đây là **kho token + hàng đợi**,
-không phải cache: `allkeys-lru` sẽ **âm thầm xoá** token và job đang chờ khi hết
-bộ nhớ. `appendonly` bật lên thì restart không mất token.
+Đây là **kho token + hàng đợi**, không phải cache: `allkeys-lru` sẽ **âm thầm
+xoá** token và job đang chờ khi chạm `maxmemory`.
 
 ```bash
 sudo systemctl restart redis-server
-redis-cli CONFIG GET maxmemory-policy appendonly   # xác nhận
+redis-cli CONFIG GET maxmemory-policy   # đọc từ Redis đang chạy, không phải từ file
+redis-cli CONFIG GET appendonly
+ss -tlnp | grep 6379                    # phải chỉ thấy 127.0.0.1 và ::1
+```
+
+### Code
+
+```bash
+sudo adduser --system --group --home /opt/fbmedia fbmedia
+sudo -u fbmedia git clone --depth 1 https://github.com/dungboss/fb-media-uploader.git /opt/fbmedia/app
+cd /opt/fbmedia/app && sudo -u fbmedia npm ci
 ```
 
 ### .env
@@ -104,41 +147,35 @@ sudo -u fbmedia npm run build
 
 ## 3. Hai tiến trình = hai systemd unit
 
+**Không dùng `EnvironmentFile`.** Next tự nạp `.env` lúc chạy và worker dùng
+`tsx --env-file-if-exists=.env`, nên app tự lo — giống hệt môi trường dev, và
+tránh chuyện systemd parse `.env` khác dotenv (dấu `#`, khoảng trắng, quote
+trong mật khẩu NAS). Chỉ `NODE_ENV` cần đặt tường minh, vì `proxy.ts` fail-closed
+dựa vào nó.
+
 `/etc/systemd/system/fbmedia-web.service`:
 
 ```ini
 [Unit]
-Description=fb-media-uploader web
+Description=fb-media-uploader web (Next.js)
 After=network.target redis-server.service
+Requires=redis-server.service
 
 [Service]
 User=fbmedia
+Group=fbmedia
 WorkingDirectory=/opt/fbmedia/app
+Environment=NODE_ENV=production
 ExecStart=/usr/bin/npm start
 Restart=always
-EnvironmentFile=/opt/fbmedia/app/.env
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-`/etc/systemd/system/fbmedia-worker.service`:
-
-```ini
-[Unit]
-Description=fb-media-uploader worker
-After=network.target redis-server.service
-
-[Service]
-User=fbmedia
-WorkingDirectory=/opt/fbmedia/app
-ExecStart=/usr/bin/npm run worker:media
-Restart=always
-EnvironmentFile=/opt/fbmedia/app/.env
-
-[Install]
-WantedBy=multi-user.target
-```
+`/etc/systemd/system/fbmedia-worker.service`: giống hệt, chỉ đổi
+`Description` và `ExecStart=/usr/bin/npm run worker:media`.
 
 ```bash
 sudo systemctl daemon-reload
@@ -153,28 +190,46 @@ nhân đôi tốc độ gọi Meta cho cùng một ad account. Đừng thêm `fb
 
 ---
 
-## 4. HTTPS + tên miền
+## 4. HTTPS
 
-Caddy tự xin chứng chỉ, ít cấu hình nhất. `/etc/caddy/Caddyfile`:
+**TLS là bắt buộc, không phải tuỳ chọn.** Bảo vệ duy nhất của app là HTTP Basic
+Auth, mà Basic Auth qua HTTP thường gửi mật khẩu **dạng chữ thường** qua mạng.
+
+Không có tên miền vẫn lấy được chứng chỉ Let's Encrypt thật: `nip.io` phân giải
+`<ip>.nip.io` về chính IP đó.
+
+```bash
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt-get update && sudo apt-get install -y caddy
+```
+
+`/etc/caddy/Caddyfile`:
 
 ```
-fbmedia.example.com {
+180.93.232.154.nip.io {
     reverse_proxy localhost:3000
 }
 ```
 
 ```bash
-sudo apt-get install -y caddy && sudo systemctl restart caddy
+sudo systemctl restart caddy
+journalctl -u caddy -n 20 --no-pager | grep -i certificate   # "certificate obtained successfully"
 ```
 
-Mở firewall **chỉ** 80/443 và SSH. Cổng 3000 và 6379 **không được** ra Internet.
+Có tên miền riêng thì trỏ A record về IP rồi thay dòng đầu — Caddy tự xin
+chứng chỉ mới, không cần làm gì thêm.
+
+Firewall chỉ mở 22/80/443. Cổng **3000 và 6379 không được** ra Internet — Caddy
+nói chuyện với app qua `localhost`.
 
 ---
 
 ## 5. Kiểm tra sau deploy — đừng bỏ bước này
 
 ```bash
-curl -o /dev/null -w "%{http_code}\n" https://fbmedia.example.com/api/webdav/entries
+curl -o /dev/null -w "%{http_code}\n" https://<host>/api/webdav/entries
 ```
 
 **Phải ra `401`.** Nếu ra `200` thì **NAS công ty đang phơi ra Internet cho bất
