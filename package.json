@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "worker:media": "tsx --env-file=.env workers/media-upload-worker.ts"
+    "worker:media": "tsx --env-file-if-exists=.env workers/media-upload-worker.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

@@ -1,0 +1,122 @@
+# Render Blueprint — 3 services, because this app is 3 processes:
+#   web      Next.js dashboard (enqueues jobs; does NOT upload)
+#   worker   the thing that actually POSTs to Meta (no free tier on Render)
+#   redis    Key Value: holds the ENCRYPTED Facebook tokens + the job queue
+#
+# Create with: Render dashboard → New → Blueprint → point at this repo.
+#
+# ⚠️ Read docs/deployment-guide.md before your first deploy. Three settings
+# below are load-bearing and fail SILENTLY if changed:
+#   1. maxmemoryPolicy: noeviction  — allkeys-lru silently evicts your tokens
+#   2. plan: starter on redis       — the free plan does NOT persist; tokens
+#                                     vanish on every restart
+#   3. TOKEN_ENCRYPTION_KEY         — must be IDENTICAL on web and worker, and
+#                                     never change afterwards, or every stored
+#                                     token becomes undecryptable with no
+#                                     recovery path
+
+envVarGroups:
+  # Shared so web and worker cannot drift apart. TOKEN_ENCRYPTION_KEY in
+  # particular MUST match: the web encrypts tokens, the worker decrypts them.
+  - name: fb-media-uploader-shared
+    envVars:
+      # openssl rand -base64 32 — set once, never change.
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: FACEBOOK_API_VERSION
+        value: v23.0
+      - key: WEBDAV_BASE_URL
+        value: https://nas-api.batmedia.info/
+      - key: WEBDAV_USERNAME
+        sync: false
+      - key: WEBDAV_PASSWORD
+        sync: false
+      - key: UPLOAD_JOB_QUEUE_NAME
+        value: media-upload
+      - key: UPLOAD_JOB_TTL_SECONDS
+        value: "604800"
+      - key: UPLOAD_JOB_ATTEMPTS
+        value: "10"
+      - key: UPLOAD_WORKER_CONCURRENCY
+        value: "4"
+      # Burst mode: effectively no cap. Do NOT set this to 1 — that is a
+      # silent 1-job/second (3600/hr) throttle.
+      - key: UPLOAD_WORKER_RATE_LIMIT_MAX
+        value: "10000"
+      - key: UPLOAD_WORKER_RATE_LIMIT_DURATION_MS
+        value: "1000"
+      - key: UPLOAD_META_RATE_LIMIT_DELAY_MS
+        value: "300000"
+      - key: UPLOAD_MAX_FILE_BYTES
+        value: "104857600"
+      - key: UPLOAD_MAX_BATCH_FILES
+        value: "10000"
+
+services:
+  - name: fb-media-uploader-web
+    type: web
+    runtime: node
+    # Singapore: nearest region to the NAS and to you. The Key Value instance
+    # below must stay in the SAME region — cross-region has no internal
+    # connection string.
+    region: singapore
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - fromGroup: fb-media-uploader-shared
+      - key: NODE_VERSION
+        # 22 LTS. Local dev runs Node 23, which is a non-LTS release already
+        # past end-of-life — fine on a laptop, wrong for a server.
+        value: "22"
+      - key: REDIS_URL
+        fromService:
+          name: fb-media-uploader-redis
+          type: keyvalue
+          property: connectionString
+      # The app's ONLY access control (proxy.ts). Without it, anyone with the
+      # URL can browse and download the whole NAS. With NODE_ENV=production and
+      # no password, the app returns 503 to everything rather than serving
+      # unprotected — a missing value is an outage, never a bypass.
+      - key: BASIC_AUTH_USER
+        value: admin
+      - key: BASIC_AUTH_PASSWORD
+        sync: false
+
+  - name: fb-media-uploader-worker
+    type: worker
+    runtime: node
+    region: singapore
+    # No free instance type exists for workers on Render. This is the service
+    # that does the uploading, so it cannot be skipped.
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run worker:media
+    envVars:
+      - fromGroup: fb-media-uploader-shared
+      - key: NODE_VERSION
+        value: "22"
+      - key: REDIS_URL
+        fromService:
+          name: fb-media-uploader-redis
+          type: keyvalue
+          property: connectionString
+      # No BASIC_AUTH_* here on purpose: the worker serves no HTTP.
+
+  - name: fb-media-uploader-redis
+    type: keyvalue
+    region: singapore
+    # NOT free: free Key Value instances have no persistence ("Data
+    # persistence is not available for free Key Value instances"), and this
+    # store holds the encrypted Facebook tokens — losing them on every restart
+    # means re-adding them by hand every time.
+    plan: starter
+    # noeviction, NOT allkeys-lru. This is a job queue plus a token store, not
+    # a cache: under memory pressure allkeys-lru would silently delete queued
+    # jobs and the tokens themselves. Render's own guidance is noeviction for
+    # queues.
+    maxmemoryPolicy: noeviction
+    # Empty allow list = reachable only from inside Render (the internal
+    # connection string), never from the public internet.
+    ipAllowList: []
