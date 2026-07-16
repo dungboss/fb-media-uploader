@@ -11,13 +11,13 @@ export interface MediaUploadConfig {
   jobTtlSeconds: number;
   jobAttempts: number;
   workerConcurrency: number;
+  // BullMQ limiter, set high in burst mode. Lower it to re-introduce a hard
+  // pacing cap without code changes. Does NOT gate the 429 backoff — see the
+  // measured limiter note in workers/media-upload-worker.ts.
   workerRateLimitMax: number;
   workerRateLimitDurationMs: number;
-  // Floor between Meta requests per ad account; phase 03 adapts upward from
-  // the observed tier/usage headers — this is only the minimum spacing.
-  metaRequestIntervalMs: number;
-  // Fallback wait used only when Meta sends no usage header to derive a
-  // wait from.
+  // How long the worker sleeps after a 429 when Meta sends no
+  // `estimated_time_to_regain_access` of its own to obey instead.
   metaRateLimitDelayMs: number;
   // OOM guard only — NOT Meta's documented image size limit (unknown; never
   // client-validated against a guess). Rejects a file before it is read
@@ -42,19 +42,20 @@ export function getMediaUploadConfig(): MediaUploadConfig {
     redisUrl,
     queueName: readOptionalEnv("UPLOAD_JOB_QUEUE_NAME") ?? DEFAULT_QUEUE_NAME,
     jobTtlSeconds: readNumberEnv("UPLOAD_JOB_TTL_SECONDS", 7 * 24 * 60 * 60),
-    // Adaptive waits (phase 03) mean fewer, better-timed attempts than the
-    // old fixed-interval hash-batch model needed.
+    // Only real failures (corrupt image, dropped connection) consume an
+    // attempt — a 429 does not (see media-upload-worker.ts BURST MODE), so 10
+    // is a budget for genuine errors, not for rate limiting.
     jobAttempts: readNumberEnv("UPLOAD_JOB_ATTEMPTS", 10),
-    // Upper bound on jobs processed in parallel. The worker paces requests
-    // per ad account (act_id) via the Redis throttle, not via this knob.
+    // Upper bound on jobs processed in parallel. Each job holds one whole
+    // image in memory for the multipart POST, so this is an OOM bound as much
+    // as a speed knob — raise it with that in mind.
     workerConcurrency: readNumberEnv("UPLOAD_WORKER_CONCURRENCY", 4),
-    workerRateLimitMax: readNumberEnv("UPLOAD_WORKER_RATE_LIMIT_MAX", 1),
+    // 10k/sec ≈ no ceiling: burst mode lets Meta's 429 define the real limit
+    // rather than guessing it here. The old default (1 per 1000ms) was a
+    // hidden 3600/hr cap that outlived the throttle it was paired with.
+    workerRateLimitMax: readNumberEnv("UPLOAD_WORKER_RATE_LIMIT_MAX", 10_000),
     workerRateLimitDurationMs: readNumberEnv(
       "UPLOAD_WORKER_RATE_LIMIT_DURATION_MS",
-      1_000
-    ),
-    metaRequestIntervalMs: readNumberEnv(
-      "UPLOAD_META_REQUEST_INTERVAL_MS",
       1_000
     ),
     metaRateLimitDelayMs: readNumberEnv(

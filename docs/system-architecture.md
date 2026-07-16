@@ -16,12 +16,12 @@ NAS folder ──PROPFIND(Depth:1)──► server enumerates + filters to image
               ┌───────────────────────────┴─────────────────────┐
       worker × concurrency 4          UI polls batches (O(1) counts)
               │                                  │
-   Redis min-interval throttle          "3200/5000 · 12 lỗi · ~14h"
-     (per ad account; 15s on dev tier)          │
+        429 retry with backoff             "3200/5000 · 12 lỗi · ~14h"
+     (wait per estimated_time_to_regain_access)          │
               │                          drill in → paged rows, failed-first
         POST act_X/adimages
               │
-   X-Business-Use-Case-Usage ──► usage store ──► brake at call_count ≥90
+   X-Business-Use-Case-Usage ──► usage store ──► monitor call_count
 ```
 
 - **Enumeration**: the client sends a NAS folder path, not a list of files.
@@ -32,16 +32,15 @@ NAS folder ──PROPFIND(Depth:1)──► server enumerates + filters to image
   stall the other 4999 via retry isolation), plus a batch record for UX
   aggregation. Not BullMQ flows — flows add orchestration this shape doesn't
   need.
-- **Pacing**: BUC-header-driven, per ad account. `X-Business-Use-Case-Usage`
-  (bucket `ads_management`) is the only usage signal `adimages` returns —
-  `X-Ad-Account-Usage` is confirmed absent on this edge (live probe,
-  2026-07-16, zero occurrences on `me/adaccounts` and `act_X/adimages`). The
-  worker reads `ads_api_access_tier` from inside that header (free, from
-  `me/adaccounts` at page load) and paces at a tier-derived interval (15s
-  dev-tier / 200ms standard-tier, never faster than
-  `UPLOAD_META_REQUEST_INTERVAL_MS`). It also brakes when `call_count`
-  approaches the tier ceiling and sleeps exactly
-  `estimated_time_to_regain_access` when Meta signals a temporary block.
+- **Rate limiting (2026-07-16 onwards)**: Removed fixed-interval pacing in favor
+  of burst mode. Worker submits images as fast as BullMQ concurrency allows
+  (4 jobs in parallel). When Meta responds with 429, worker sleeps exactly
+  `estimated_time_to_regain_access` from the response header, then retries.
+  This maximizes throughput under quota without guessing the tier's true ceiling.
+  The ceiling scales with `active_ads` (unknown) — fixed pacing never achieved
+  it anyway; burst + react-to-429 is more honest. `X-Business-Use-Case-Usage`
+  (bucket `ads_management`) remains the usage signal; `call_count` is monitored
+  in logs only.
 - **Why not spread one batch across ad accounts**: BUC limits are per ad
   account, so 5 accounts looks like 5× throughput — it is not, for this use
   case. `image_hash` values are per-account assets (an `act_A` hash is
@@ -58,7 +57,7 @@ NAS folder ──PROPFIND(Depth:1)──► server enumerates + filters to image
 | Prefix | Owner | Notes |
 |---|---|---|
 | `audience-upload:fb-tokens` | `lib/media-upload/token-store.ts` (`TOKENS_KEY`) | **Deliberately not renamed** during the audience→media pivot. Tokens are encrypted with a key derived via `scryptSync(key, SCRYPT_SALT)` where `SCRYPT_SALT = "fb-audience-uploader:token-store:v1"`. Renaming either constant changes the derived encryption key and makes every already-stored token undecryptable, with no migration path. Both carry code comments; see also README "Security notes." |
-| `media-upload:*` | `lib/media-upload/*`, `workers/*` | Jobs, batch records, per-status SETs, throttle mutex keys. New prefix for the pivot — old `audience-upload:*` job/batch keys (pre-pivot product) are simply left to TTL out, no migration. |
+| `media-upload:*` | `lib/media-upload/*`, `workers/*` | Jobs, batch records, per-status SETs. New prefix for the pivot — old `audience-upload:*` job/batch keys (pre-pivot product) are simply left to TTL out, no migration. |
 
 ## Batch progress model
 
@@ -97,11 +96,12 @@ Probe against the real token, 2026-07-16, overrides doc-derived assumptions:
      "ads_api_access_tier":"development_access"}]}
    ```
 
-4. Measured throughput: dev tier `300 + 40 × active_ads` calls/hr → our 15s
-   pacing yields ~240 images/hr → a 5000-image folder takes ~21 hours.
-   Standard tier is ~75× faster (~17 minutes for the same folder). `ETA` in
-   the UI is always computed from observed throughput, never from this
-   formula, because `active_ads` is unknown and not controllable.
+4. **Note (2026-07-16):** The original 15s fixed-interval pacing was removed in
+   favor of burst mode. Fixed pacing never reached the tier's true quota because
+   quota includes `40 × active_ads` (unknown) and `active_ads` is not observable.
+   Pacing at a sàn-tier interval (15s) was overly conservative and wasted the
+   variable portion. Burst mode + react-to-429 is simpler and more efficient.
+   **ETA in the UI remains computed from observed throughput, never formula.**
 
 ## Gate removal (reverses `6e34a33` / `0f8756f`)
 
@@ -111,7 +111,7 @@ image-upload workload shape is fundamentally different: few large files
 running for hours (gate is reasonable) became thousands of small images at
 seconds-per-image (the gate becomes a false bottleneck — each account
 processes strictly sequentially while request-level throttling already
-protects Meta). The gate was removed in favor of the per-account Redis
-min-interval throttle described above, proven under concurrent load in
-`workers/media-upload-throttle.test.ts` (8 concurrent waiters × 5 acquisitions
-each, minimum observed gap ≥ the configured interval floor).
+protects Meta). The gate was removed in favor of burst concurrency (up to 4
+jobs in parallel per worker process), with 429-driven backoff supplying
+automatic rate limiting. Meta's `estimated_time_to_regain_access` header
+provides the authoritative wait time on each block.

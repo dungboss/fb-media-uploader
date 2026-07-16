@@ -25,6 +25,14 @@ doc-derived model. Docs for reference only:
 [Marketing API](https://developers.facebook.com/docs/marketing-api/overview/rate-limiting/) ·
 [Graph API](https://developers.facebook.com/docs/graph-api/overview/rate-limiting/).
 
+**Decision (2026-07-16):** Burst mode + 429 backoff replaces the earlier
+fixed-interval pacing strategy. The pacing numbers below (15s/200ms intervals)
+are historical; the implementation now uploads burst and waits only when Meta
+signals 429 with `estimated_time_to_regain_access`. This is simpler and more
+efficient because the quota ceiling includes `40 × active_ads` (unknown), so
+fixed pacing was always a guess. **Items 1–4 below remain valid as ground truth
+about Meta's behavior and the quota formula; they inform why burst mode is correct.**
+
 **1. All 5 ad accounts are `development_access`.** (Miho 1–5:
 `act_1354278695880333`, `act_660062069985442`, `act_679927437761688`,
 `act_1874694576280943`, `act_1569761797025413`.)
@@ -54,20 +62,24 @@ UI learns the tier at page load for free, no probe call.**
 **4. `adimages` reports into the `ads_management` BUC bucket.** The edge is
 rate-limited and tells us so. Header-driven pacing survives — its input is BUC.
 
-**5. Therefore:**
+**5. Therefore (as of 2026-07-16):**
 
-| Tier | BUC quota (per ad account) | Our pacing | 5000 images |
-|---|---|---|---|
-| **`development_access`** ← **what ships** | `300 + 40 × active_ads` calls/hr | 15s interval → ~240/hr | **~21 hours** |
-| `standard_access` (if upgraded) | `100000 + 40 × active_ads` calls/hr | 200ms floor → ~18,000/hr | ~17 min |
+The quota ceiling is `300 + 40 × active_ads` (dev) / `100000 + 40 × active_ads` (standard).
+Since `active_ads` is unknown and unobservable, **drain time cannot be predicted from
+formula**. Fixed-interval pacing (15s / 200ms) was always a guess at the floor and
+wasted the variable portion.
 
-**~75× spread.** `call_count: 0` today — the accounts are fresh, no head start.
-Quota scales with `active_ads`, which we neither know nor control → **ETA is
-computed from observed throughput, never from the formula**.
+**Implementation:** Worker uploads at full concurrency (4 jobs in parallel) and
+reacts only to 429 blocks from Meta, sleeping `estimated_time_to_regain_access`.
+This is simpler, more efficient, and doesn't bet on an unknown `active_ads` value.
 
-**The upgrade path is the only real lever.** Requesting Standard access beats
-anything we can write by ~75×. The UI must say so next to the ETA (phase 05), not
-bury it.
+**ETA:** Computed from observed throughput (remaining images / completion rate),
+never from the quota formula. Actual throughput varies based on the account's
+true `active_ads` count.
+
+**The upgrade path is the only real lever.** Standard access (10x the dev quota)
+is the honest lever for faster throughput. The UI callout in phase 05 advertises
+it next to ETA; that's the only practical optimization that applies to all users.
 
 ## Why we do NOT spread a batch across the 5 ad accounts
 

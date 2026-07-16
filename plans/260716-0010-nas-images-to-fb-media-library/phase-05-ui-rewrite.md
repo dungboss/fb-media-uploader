@@ -169,17 +169,24 @@ directory listing to show N. No checkboxes, no select-all.
    when `skipped.length`, a warning toast with the first 3 reasons.
 10. **Tier surface (two places, both non-negotiable).** Source: `tier` on the
     ad-accounts response — already there, no extra call.
+    
+    **[SUPERSEDED 2026-07-16]** The speed numbers below (240 ảnh/giờ, ~75×) are
+    historical and based on fixed-interval pacing (15s). Implementation now uses
+    burst mode + 429 backoff; actual throughput is measured in the UI (remaining
+    / observed-rate), not formula-derived. The callout text and concept remain
+    valid (Standard access is the real lever), but replace speed numbers with
+    measured ETA. See [plan.md](plan.md) "Rate-limit ground truth."
+    
     a. `ad-account-picker.tsx` — badge next to the account.
        `development_access` → **warning**; `standard_access` → neutral.
     b. `folder-upload-panel.tsx` — **before** the user commits, once a folder with
        N images is chosen and the tier is `development_access`, show an inline
        callout (not a tooltip, not a toast):
-       > ⚠️ Tài khoản đang ở **Development tier** — khoảng **240 ảnh/giờ**.
-       > {N} ảnh ≈ **{N/240} giờ**. Xin cấp **Standard access** để nhanh hơn ~75×.
+       > ⚠️ Tài khoản đang ở **Development tier**. 
+       > {N} ảnh — ETA dùng tốc độ đo được. Xin cấp **Standard access** để nhanh hơn.
        > [Hướng dẫn nâng tier ↗]
        Link: Meta's ads API access-tier docs. Repeat it compactly on `batch-card`
-       next to the ETA while the batch drains — that's when "21 hours" starts to
-       hurt and the user wants the fix.
+       next to the ETA while the batch drains.
     Do **not** block the upload — inform, don't gate.
 11. Recompose `app/page.tsx`. Verify < 150 lines.
 12. Gate: `npx tsc --noEmit && npm run lint && npm test && npm run build` + the checklist.
@@ -224,7 +231,7 @@ directory listing to show N. No checkboxes, no select-all.
 | Risk | L×I | Mitigation |
 |---|---|---|
 | Big-bang rewrite of 2211 lines breaks token/ad-account flows | **High** × Med | Step 1 extracts working code *unchanged*, build-verified per move, before any rewrite |
-| ETA wrong early on (dev tier's 15s pacing is steady, but a brake/throttle skews the average) | Med × Low | Label "ước tính"; hide until ≥20 completions. Dev-tier pacing is actually *very* regular (15s/image), so the observed rate converges fast. Don't build a smarter estimator (YAGNI) |
+| ETA wrong early on (burst mode has variable latency until 429 occurs) | Med × Low | Label "ước tính"; hide until ≥20 completions. Compute from observed throughput (remaining / completion-rate), converges fast once jobs start completing. Don't build a smarter estimator (YAGNI). **[SUPERSEDED 2026-07-16]** Original risk was based on fixed 15s pacing; burst mode has different characteristics but same mitigation applies. |
 | **A 21h batch spans browser sessions** — user closes the tab, assumes it died | **High** × Med | All state is server-side (Redis + BullMQ); the batch list rehydrates on load. Say so in the empty/loading copy: "đóng tab vẫn chạy tiếp" |
 | Poll still heavy: 50 batches × 5 SCARD every 2s | Low × Low | Pipelined server-side (phase 04), < 100ms; only while active |
 | Batch card hides individual failures → user never drills in | Med × Med | Failed count is prominent + "Thử lại N lỗi" on the card itself |

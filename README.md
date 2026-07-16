@@ -87,53 +87,42 @@ offset — xem "Vì sao bỏ resume theo offset" bên dưới.
 **Đây là đặc điểm hiệu năng quan trọng nhất của sản phẩm, không phải chi
 tiết vặt.** Đo thực tế (probe sống, 2026-07-16), không suy từ tài liệu Meta:
 
-| Tier | BUC quota / ad account | Pacing của app | 5000 ảnh |
-|---|---|---|---|
-| **`development_access`** ← tier hiện tại của mọi ad account | `300 + 40 × active_ads` calls/hr | 15s/ảnh | **~21 giờ** |
-| `standard_access` (Full Access) | `100000 + 40 × active_ads` calls/hr | 200ms/ảnh | ~17 phút |
+| Tier | BUC quota / ad account | Upload mode |
+|---|---|---|
+| **`development_access`** ← tier hiện tại của mọi ad account | `300 + 40 × active_ads` calls/hr | **Burst + 429 backoff** |
+| `standard_access` (Full Access) | `100000 + 40 × active_ads` calls/hr | **Burst + 429 backoff** |
 
-**~75×.** Nếu 21 giờ không chấp nhận được, **cách duy nhất thực sự hiệu quả
-là xin nâng lên Standard access** — không có config nào trong repo này rút
-ngắn khoảng cách 75 lần đó. Xem
-[Marketing API rate limiting](https://developers.facebook.com/docs/marketing-api/overview/rate-limiting/).
+**Burst mode + 429 backoff (2026-07-16 onwards):**
+- Worker uploads images as fast as concurrency allows (default 4 jobs in parallel).
+- When Meta responds with 429 (rate limited), worker sleeps exactly
+  `estimated_time_to_regain_access` from the response header, then retries.
+- This maximizes throughput without guessing the tier's true ceiling — the
+  ceiling scales with `active_ads` (unknown and unobservable) so fixed-interval
+  pacing was always a guess.
+- `X-Business-Use-Case-Usage` (bucket `ads_management`) is the only usage signal.
+- **ETA in dashboard is computed from observed throughput, never formula.**
+  Actual drain time depends on your `active_ads` value, which is unknown.
+- The only way to reliably improve throughput is to request **Standard access**
+  from Meta (xem [Marketing API rate limiting](https://developers.facebook.com/docs/marketing-api/overview/rate-limiting/)).
 
-Cơ chế đo được, không phải suy đoán:
-- `X-Business-Use-Case-Usage` (bucket `ads_management`) là tín hiệu quota
-  sống duy nhất — `adimages` báo cáo vào bucket này. **`X-Ad-Account-Usage`
-  KHÔNG xuất hiện** trên `me/adaccounts` hay `act_X/adimages` (0 lần trong
-  probe) — app không dựa vào nó, dù nó có tồn tại ngầm thì pacing 15s vẫn đủ
-  bảo thủ để tôn trọng nó.
-- App tự phát hiện tier từ trường `ads_api_access_tier` **nằm trong** header
-  đó (đọc miễn phí từ `me/adaccounts` lúc tải trang, không tốn thêm call),
-  pace theo tier, phanh lại khi `call_count` gần chạm giới hạn, và chờ đúng
-  `estimated_time_to_regain_access` khi bị Meta từ chối tạm thời.
-- Quota thật phụ thuộc `active_ads` (app không biết, không kiểm soát được) →
-  **ETA trong dashboard luôn tính từ throughput đo được, không bao giờ từ
-  công thức quota**.
-- Tinh chỉnh: nếu log worker cho thấy `call_count` luôn thấp (tài khoản có
-  nhiều ads đang chạy → quota thật cao hơn sàn), có thể hạ
-  `UPLOAD_META_REQUEST_INTERVAL_MS` để tăng tốc trong giới hạn tier.
+## Burst upload & the single-worker-process requirement
 
-## Pacing & the single-worker-process requirement
-
-Không còn "tối đa 1 job/ad account cùng lúc" (gate đó đã bị gỡ, xem phần dưới).
-Thay vào đó: **mỗi ad account có một throttle riêng theo min-interval** (Redis
-`SET NX PX`), tự thích nghi theo tier phát hiện được (15s dev-tier / 200ms
-standard-tier, không bao giờ nhanh hơn sàn `UPLOAD_META_REQUEST_INTERVAL_MS`).
-Nhiều ad account chạy song song với throttle độc lập — không chia sẻ một
-cổng chung.
+Không còn "tối đa 1 job/ad account cùng lúc" (gate đó đã bị gỡ).
+Thay vào đó: **upload theo kiểu burst** — BullMQ concurrency xử lý N job song
+song (default 4). Khi Meta trả 429, worker chờ `estimated_time_to_regain_access`
+rồi thử lại. Nhiều ad account tự chạy song song — không chia sẻ cổng chung, không
+throttle mutex cũ nữa.
 
 **Chạy đúng một tiến trình worker.** Usage store (đọc header
 `X-Business-Use-Case-Usage`) và cache batch đều nằm **in-memory trong tiến
 trình worker** — không có điều phối liên-tiến-trình. Chạy 2 tiến trình
 `worker:media` song song sẽ âm thầm nhân đôi tốc độ gọi Meta cho cùng một ad
-account, vượt throttle dự tính và dễ dính 429. Đây là yêu cầu đúng đắn, không
-phải khuyến nghị.
+account, vượt ngưỡng quota thật và dễ dính 429 liên tục. Đây là yêu cầu đúng
+đắn, không phải khuyến nghị.
 
 `UPLOAD_WORKER_CONCURRENCY` (mặc định 4) chỉ giới hạn số job xử lý song song
-trong tiến trình đó — nó **không** còn liên quan gì đến số ad account (gate
-theo ad account đã bị gỡ). Pacing thật sự nằm ở Redis throttle per-account,
-không phải ở biến này.
+trong tiến trình đó. Tốc độ upload hiện tại bị kiểm soát bởi Meta quota +
+429 backoff, không phải biến này.
 
 ### Vì sao bỏ gate "1 job/ad account"
 
@@ -196,8 +185,7 @@ table.
 | `UPLOAD_JOB_TTL_SECONDS` | no | `604800` (7d) | **Must exceed the longest expected drain.** A dev-tier 5000-image batch takes ~21h; queued jobs sit untouched while waiting, so a 24h TTL would expire them mid-drain. Raised from 24h for exactly this reason |
 | `UPLOAD_JOB_ATTEMPTS` | no | `10` | Retry attempts per job before it's marked failed |
 | `UPLOAD_WORKER_CONCURRENCY` | no | `4` | Jobs processed in parallel **within the one worker process**. No longer tied to ad-account count (the per-account gate is gone) |
-| `UPLOAD_WORKER_RATE_LIMIT_MAX` / `UPLOAD_WORKER_RATE_LIMIT_DURATION_MS` | no | `1` / `1000` | BullMQ's own global rate limiter (queue-level safety net, separate from the per-account Meta throttle) |
-| `UPLOAD_META_REQUEST_INTERVAL_MS` | no | `1000` | **Floor only.** Tier-adaptive pacing (15s dev-tier / 200ms standard-tier) paces slower than this when the detected tier requires it; never faster |
+| `UPLOAD_WORKER_RATE_LIMIT_MAX` / `UPLOAD_WORKER_RATE_LIMIT_DURATION_MS` | no | `1` / `1000` | BullMQ's own global rate limiter (queue-level safety net, separate from Meta rate limiting via 429 backoff) |
 | `UPLOAD_META_RATE_LIMIT_DELAY_MS` | no | `300000` (5m) | **Fallback only** — used when Meta's response carries no usage header to derive a wait from |
 | `UPLOAD_MAX_FILE_BYTES` | no | `104857600` (100MB) | **OOM guard, not Meta's image size limit** (Meta's real limit is undocumented/unknown). Rejects a file before fully reading it into memory |
 | `UPLOAD_MAX_BATCH_FILES` | no | `10000` | Folder-mode batch cap. Explicit multi-file picks are separately capped at 500 |

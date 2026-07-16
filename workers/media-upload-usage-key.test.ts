@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getUsage, recordUsageFromHeaders } from "../lib/media-upload/meta-usage";
-import { resolveAccountKey } from "./media-upload-throttle";
+import { resolveAccountKey } from "./media-upload-usage-log";
 
 // Verbatim from the 2026-07-16 live probe: bare id key, no act_ prefix.
 const BUC_PAYLOAD = JSON.stringify({
