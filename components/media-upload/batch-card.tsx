@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { Download, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -12,7 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { AdAccount } from "@/hooks/use-ad-accounts";
 import { formatEta, formatNumber } from "@/lib/media-upload/format";
@@ -126,6 +126,21 @@ export function BatchCard({
             )}
             Thử lại {formatNumber(counts.failed)} lỗi
           </Button>
+        ) : null}
+        {doneCount > 0 ? (
+          // A plain <a>, not a fetch+blob: the export streams, so letting the
+          // browser own the download keeps memory flat on a 10k-row batch and
+          // gives a real progress indicator for free. Styled via
+          // buttonVariants because Button wraps a base-ui primitive with no
+          // asChild escape hatch.
+          <a
+            href={`/api/upload-batches/${batch.id}/export`}
+            download
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <Download className="size-3.5" />
+            Tải CSV
+          </a>
         ) : null}
         <Button
           type="button"
