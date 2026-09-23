@@ -100,7 +100,7 @@ export default function Home() {
 
         <Card className="rounded-[28px] border-white/60 bg-white/85 shadow-lg shadow-slate-950/5 backdrop-blur">
           <CardHeader>
-            <CardTitle className="text-lg">Upload ảnh từ NAS</CardTitle>
+            <CardTitle className="text-lg">Upload ảnh từ NAS hoặc máy tính</CardTitle>
           </CardHeader>
           <CardContent>
             <FolderUploadPanel
@@ -109,6 +109,7 @@ export default function Home() {
               hasToken={fbTokens.hasAnyTokenOption}
               adAccount={selectedAccount}
               onCreateBatch={uploadBatches.createFromFolder}
+              onCreateLocalBatch={uploadBatches.createFromLocalFolder}
             />
           </CardContent>
         </Card>

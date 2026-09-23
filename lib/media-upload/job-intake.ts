@@ -21,8 +21,9 @@ import { getRedis } from "./redis";
 import type { MediaUploadBatch, MediaUploadJob } from "./types";
 
 export interface CreateMediaUploadJobsInput {
-  files: Array<{ nasFilePath: string; fileSize?: number | null }>;
+  files: Array<{ nasFilePath: string; fileSize?: number | null; fileName?: string }>;
   nasFolderPath: string | null;
+  localUploadSessionId?: string | null;
   adAccountId?: string;
   adAccountName?: string;
   appName?: string;
@@ -65,6 +66,7 @@ export async function createMediaUploadJobs(
   const batch = createBatch({
     id: batchId,
     nasFolderPath: input.nasFolderPath,
+    localUploadSessionId: input.localUploadSessionId ?? null,
     total: accepted.length,
     adAccountId: input.adAccountId?.trim() || null,
     adAccountName: input.adAccountName?.trim() || null,
@@ -72,12 +74,12 @@ export async function createMediaUploadJobs(
     tokenId: input.tokenId?.trim() || null,
   });
 
-  const jobs: MediaUploadJob[] = accepted.map(({ nasFilePath, fileSize }) => ({
+  const jobs: MediaUploadJob[] = accepted.map(({ nasFilePath, fileSize, fileName }) => ({
     id: randomUUID(),
     batchId,
     status: "queued",
     nasFilePath,
-    fileName: nasFilePath.split("/").filter(Boolean).pop() ?? nasFilePath,
+    fileName,
     fileSize,
     imageHash: null,
     previewUrl: null,
@@ -110,15 +112,16 @@ export async function createMediaUploadJobs(
 }
 
 function filterUploadableFiles(
-  files: Array<{ nasFilePath: string; fileSize?: number | null }>,
+  files: Array<{ nasFilePath: string; fileSize?: number | null; fileName?: string }>,
   maxFileBytes: number
 ) {
-  const accepted: Array<{ nasFilePath: string; fileSize: number | null }> = [];
+  const accepted: Array<{ nasFilePath: string; fileSize: number | null; fileName: string }> = [];
   const skipped: Array<{ nasFilePath: string; reason: string }> = [];
 
   for (const file of files) {
     const nasFilePath = file.nasFilePath?.trim() ?? "";
-    const fileName = nasFilePath.split("/").filter(Boolean).pop() ?? nasFilePath;
+    const fileName =
+      file.fileName?.trim() || nasFilePath.split("/").filter(Boolean).pop() || nasFilePath;
 
     if (!nasFilePath) {
       skipped.push({ nasFilePath, reason: "Đường dẫn không hợp lệ." });
@@ -140,7 +143,7 @@ function filterUploadableFiles(
       continue;
     }
 
-    accepted.push({ nasFilePath, fileSize });
+    accepted.push({ nasFilePath, fileSize, fileName });
   }
 
   return { accepted, skipped };

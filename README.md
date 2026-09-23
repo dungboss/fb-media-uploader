@@ -105,12 +105,15 @@ account. `FACEBOOK_AD_ACCOUNT_ID` is only an optional default. The same
 `me/adaccounts` call also returns each account's access tier for free (see
 below) — no extra probe call.
 
-## Upload ảnh từ NAS
+## Upload ảnh từ NAS hoặc máy tính
 
 1. Chọn token + ad account ở header.
-2. Bấm **Chọn thư mục NAS**, duyệt tới thư mục ảnh. Server PROPFIND
-   (`Depth: 1`, không đệ quy) thư mục đó và lọc còn `.jpg .jpeg .png .gif` —
-   file khác không phải ảnh không hiện ra, không tính là "bị bỏ qua".
+2. Chọn một trong hai nguồn:
+   - **Duyệt NAS**: server PROPFIND (`Depth: 1`, không đệ quy) thư mục đó và
+     lọc còn `.jpg .jpeg .png .gif`.
+   - **Chọn folder từ máy**: trình duyệt lấy ảnh trong folder (kể cả thư mục
+     con), tải từng file vào vùng tạm rồi mới tạo batch. File tạm được xoá
+     sau khi upload thành công; phần còn lại được xoá cùng batch.
 3. Bấm upload → server tạo **1 batch record + N job** (1 job/ảnh, dùng BullMQ
    `addBulk` — một lần gọi, không phải N request). Batch tối đa
    `UPLOAD_MAX_BATCH_FILES` ảnh (mặc định 10,000); nếu chọn file lẻ thay vì cả

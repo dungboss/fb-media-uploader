@@ -8,12 +8,16 @@
 import { isSupportedWebDavUploadFile, normalizeWebDavPath } from "@/lib/webdav";
 import { fetchWebDavDirectoryResponse } from "@/lib/webdav.server";
 import { FacebookApiError } from "@/lib/media-upload/facebook-error";
+import { parseLocalUploadRef } from "@/lib/media-upload/local-upload-store";
 
 const MAX_EXPLICIT_FILES = 500;
 
 export interface CreateBatchRequestBody {
   nasFolderPath?: unknown;
   files?: unknown;
+  localFiles?: unknown;
+  localFolderName?: unknown;
+  localUploadSessionId?: unknown;
   adAccountId?: unknown;
   adAccountName?: unknown;
   appName?: unknown;
@@ -21,8 +25,9 @@ export interface CreateBatchRequestBody {
 }
 
 export interface ResolvedBatchFiles {
-  files: Array<{ nasFilePath: string; fileSize: number | null }>;
+  files: Array<{ nasFilePath: string; fileSize: number | null; fileName?: string }>;
   nasFolderPath: string | null;
+  localUploadSessionId: string | null;
   accountMeta: {
     adAccountId?: string;
     adAccountName?: string;
@@ -41,10 +46,11 @@ export async function resolveBatchFiles(
     typeof body.nasFolderPath === "string" ? body.nasFolderPath.trim() : "";
   const hasFolderPath = rawFolderPath.length > 0;
   const hasFiles = Array.isArray(body.files);
+  const hasLocalFiles = Array.isArray(body.localFiles);
 
-  if (hasFolderPath === hasFiles) {
+  if ([hasFolderPath, hasFiles, hasLocalFiles].filter(Boolean).length !== 1) {
     throw new FacebookApiError(
-      "Chọn đúng một trong hai: đường dẫn thư mục NAS hoặc danh sách file.",
+      "Chọn đúng một nguồn: thư mục NAS, danh sách file NAS hoặc thư mục local.",
       400
     );
   }
@@ -58,14 +64,55 @@ export async function resolveBatchFiles(
 
   if (hasFolderPath) {
     const { files, nasFolderPath } = await enumerateFolder(rawFolderPath);
-    return { files, nasFolderPath, accountMeta };
+    return { files, nasFolderPath, localUploadSessionId: null, accountMeta };
+  }
+
+  if (hasLocalFiles) {
+    const sessionId = pickString(body.localUploadSessionId);
+    if (!sessionId) {
+      throw new FacebookApiError("Thiếu upload session cho thư mục local.", 400);
+    }
+
+    const files = resolveLocalFiles(body.localFiles, sessionId);
+    const folderName = pickString(body.localFolderName) || "Thư mục local";
+    return {
+      files,
+      nasFolderPath: `Máy tính: ${folderName}`,
+      localUploadSessionId: sessionId,
+      accountMeta,
+    };
   }
 
   return {
     files: resolveExplicitFiles(body.files),
     nasFolderPath: null,
+    localUploadSessionId: null,
     accountMeta,
   };
+}
+
+function resolveLocalFiles(rawFiles: unknown, sessionId: string) {
+  const list = Array.isArray(rawFiles) ? rawFiles : [];
+
+  return list
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === "object"
+    )
+    .map((entry) => {
+      const localFileRef =
+        typeof entry.localFileRef === "string" ? entry.localFileRef.trim() : "";
+      const parsed = parseLocalUploadRef(localFileRef);
+      if (!parsed || parsed.sessionId !== sessionId) {
+        throw new FacebookApiError("File local không thuộc upload session hiện tại.", 400);
+      }
+
+      return {
+        nasFilePath: localFileRef,
+        fileName: typeof entry.fileName === "string" ? entry.fileName.trim() : "",
+        fileSize: typeof entry.fileSize === "number" ? entry.fileSize : null,
+      };
+    });
 }
 
 // PROPFIND Depth:1 (non-recursive — bounded cost, no surprise crawl of a

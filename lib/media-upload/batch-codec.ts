@@ -7,6 +7,7 @@ export function toBatchHashPatch(batch: MediaUploadBatch): Record<string, string
   return {
     id: batch.id,
     nasFolderPath: batch.nasFolderPath ?? "",
+    localUploadSessionId: batch.localUploadSessionId ?? "",
     total: String(batch.total),
     adAccountId: batch.adAccountId ?? "",
     adAccountName: batch.adAccountName ?? "",
@@ -24,6 +25,7 @@ export function parseBatchPayload(
   return {
     id: batchId,
     nasFolderPath: payload.nasFolderPath || null,
+    localUploadSessionId: payload.localUploadSessionId || null,
     total: Number.parseInt(payload.total ?? "0", 10) || 0,
     adAccountId: payload.adAccountId || null,
     adAccountName: payload.adAccountName || null,

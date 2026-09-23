@@ -9,6 +9,7 @@ import {
 import { FacebookApiError } from "@/lib/media-upload/facebook-error";
 import { transitionJobStatus } from "@/lib/media-upload/jobs";
 import { getClientSafeError } from "@/lib/media-upload/meta-graph";
+import { deleteLocalUploadSession } from "@/lib/media-upload/local-upload-store";
 import { removeMediaUploadJob } from "@/lib/media-upload/queue";
 
 import { collectSetMembers } from "../collect-set-members";
@@ -57,6 +58,9 @@ export async function DELETE(
     }
 
     await cancelNonTerminalJobs(batchId);
+    if (batch.localUploadSessionId) {
+      await deleteLocalUploadSession(batch.localUploadSessionId);
+    }
     await deleteBatch(batchId);
 
     return NextResponse.json({ id: batchId, deleted: true });

@@ -32,6 +32,7 @@ export { getBatchJobsListKey, getBatchKey, getBatchStatusSetKey };
 export function createBatch(input: {
   id: string;
   nasFolderPath: string | null;
+  localUploadSessionId: string | null;
   total: number;
   adAccountId: string | null;
   adAccountName: string | null;
@@ -43,6 +44,7 @@ export function createBatch(input: {
   return {
     id: input.id,
     nasFolderPath: input.nasFolderPath,
+    localUploadSessionId: input.localUploadSessionId,
     total: input.total,
     adAccountId: input.adAccountId,
     adAccountName: input.adAccountName,
@@ -181,4 +183,3 @@ export async function refreshBatchExpiry(batchId: string) {
 
   await pipeline.exec();
 }
-

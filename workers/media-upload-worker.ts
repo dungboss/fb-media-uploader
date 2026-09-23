@@ -44,6 +44,11 @@ import { getBatch } from "../lib/media-upload/batches";
 import { getMediaUploadConfig } from "../lib/media-upload/env";
 import { FacebookApiError } from "../lib/media-upload/facebook-error";
 import { getMediaUploadJob, transitionJobStatus } from "../lib/media-upload/jobs";
+import {
+  deleteLocalUpload,
+  isLocalUploadRef,
+  readLocalUpload,
+} from "../lib/media-upload/local-upload-store";
 import { uploadAdImage } from "../lib/media-upload/meta-images";
 import { getBullConnectionOptions } from "../lib/media-upload/redis";
 import type { MediaUploadBatch, MediaUploadJobPayload } from "../lib/media-upload/types";
@@ -110,7 +115,12 @@ async function processJob(bullJob: BullJob) {
     const batch = await getBatchCached(job.batchId);
     if (await isJobCancelled(jobId)) throw new JobCancelledError();
 
-    const { buffer, contentType } = await fetchWebDavFileBuffer(job.nasFilePath);
+    const { buffer, contentType } = isLocalUploadRef(job.nasFilePath)
+      ? {
+          buffer: await readLocalUpload(job.nasFilePath),
+          contentType: contentTypeFromFileName(job.fileName),
+        }
+      : await fetchWebDavFileBuffer(job.nasFilePath);
 
     // OOM guard only — NOT Meta's (unknown) documented image size limit.
     if (buffer.byteLength > getMediaUploadConfig().maxFileBytes) {
@@ -129,6 +139,14 @@ async function processJob(bullJob: BullJob) {
 
     logUsageProgress(accountKey);
     await transitionJobStatus(jobId, "completed", { imageHash: result.hash, previewUrl: result.previewUrl });
+    if (isLocalUploadRef(job.nasFilePath)) {
+      await deleteLocalUpload(job.nasFilePath).catch((cleanupError) => {
+        console.warn(
+          `[media-upload-worker] không dọn được file local của job ${jobId}:`,
+          cleanupError
+        );
+      });
+    }
     return { jobId, imageHash: result.hash };
   } catch (error) {
     if (error instanceof JobCancelledError) {
@@ -156,6 +174,14 @@ async function processJob(bullJob: BullJob) {
 
     throw translated;
   }
+}
+
+function contentTypeFromFileName(fileName: string) {
+  const extension = fileName.split(".").pop()?.toLowerCase();
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "png") return "image/png";
+  if (extension === "gif") return "image/gif";
+  return "application/octet-stream";
 }
 
 // A job record vanishes when its batch is deleted (see the orphan guard in

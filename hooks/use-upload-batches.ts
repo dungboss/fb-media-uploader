@@ -22,6 +22,16 @@ export interface CreateBatchInput {
   tokenId?: string;
 }
 
+export interface CreateLocalBatchInput {
+  files: File[];
+  folderName: string;
+  adAccountId: string;
+  adAccountName?: string;
+  appName?: string;
+  tokenId?: string;
+  onProgress?: (uploaded: number, total: number) => void;
+}
+
 export interface CreateBatchResponse {
   batch: MediaUploadBatch;
   counts: MediaUploadBatchCounts;
@@ -100,6 +110,71 @@ export function useUploadBatches() {
     [refresh]
   );
 
+  const createFromLocalFolder = useCallback(
+    async (input: CreateLocalBatchInput) => {
+      const sessionId = crypto.randomUUID();
+      const staged: Array<{
+        localFileRef: string;
+        fileName: string;
+        fileSize: number;
+      }> = [];
+      let nextIndex = 0;
+      let uploaded = 0;
+      let uploadError: unknown = null;
+
+      try {
+        // Two concurrent request bodies keep throughput reasonable without
+        // multiplying the route's whole-file memory use by a large factor.
+        const uploadOneByOne = async () => {
+          while (!uploadError && nextIndex < input.files.length) {
+            const file = input.files[nextIndex++];
+            try {
+              const form = new FormData();
+              form.set("sessionId", sessionId);
+              form.set("file", file, file.name);
+
+              const result = await fetchJson<{
+                localFileRef: string;
+                fileName: string;
+                fileSize: number;
+              }>("/api/local-uploads", { method: "POST", body: form });
+              staged.push(result);
+              uploaded += 1;
+              input.onProgress?.(uploaded, input.files.length);
+            } catch (error) {
+              uploadError = error;
+            }
+          }
+        };
+
+        await Promise.all([uploadOneByOne(), uploadOneByOne()]);
+        if (uploadError) throw uploadError;
+
+        const response = await fetchJson<CreateBatchResponse>("/api/upload-batches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            localFiles: staged,
+            localFolderName: input.folderName,
+            localUploadSessionId: sessionId,
+            adAccountId: input.adAccountId,
+            adAccountName: input.adAccountName,
+            appName: input.appName,
+            tokenId: input.tokenId,
+          }),
+        });
+        await refresh();
+        return response;
+      } catch (error) {
+        await fetch(`/api/local-uploads?sessionId=${encodeURIComponent(sessionId)}`, {
+          method: "DELETE",
+        }).catch(() => {});
+        throw error;
+      }
+    },
+    [refresh]
+  );
+
   const retryFailed = useCallback(
     async (batchId: string) => {
       const response = await fetchJson<{ retried?: number }>(
@@ -127,6 +202,7 @@ export function useUploadBatches() {
     lastSyncedAt,
     refresh,
     createFromFolder,
+    createFromLocalFolder,
     retryFailed,
     deleteBatch,
   };

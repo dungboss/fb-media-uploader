@@ -40,6 +40,9 @@ export interface MediaUploadBatch {
   // Null when the batch was built from an explicit file list instead of a
   // NAS folder pick.
   nasFolderPath: string | null;
+  // Set only for a browser-local folder. Lets batch deletion remove staged
+  // files after the worker no longer needs them.
+  localUploadSessionId: string | null;
   total: number;
   // Ad account / token snapshotted once per batch (not per job) — at 5000
   // jobs that would be 5000 copies of the same 4 strings.

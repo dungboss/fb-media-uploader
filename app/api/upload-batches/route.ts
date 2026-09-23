@@ -18,11 +18,13 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as CreateBatchRequestBody;
-    const { files, nasFolderPath, accountMeta } = await resolveBatchFiles(body);
+    const { files, nasFolderPath, localUploadSessionId, accountMeta } =
+      await resolveBatchFiles(body);
 
     const { batch, jobs, skipped } = await createMediaUploadJobs({
       files,
       nasFolderPath,
+      localUploadSessionId,
       ...accountMeta,
     });
 
