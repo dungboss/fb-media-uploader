@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Allow the LAN URL used to open this app to connect to the dev runtime.
+  allowedDevOrigins: ["192.168.1.20"],
   serverExternalPackages: ["bullmq", "ioredis"],
   experimental: {
     // Local-folder files pass through proxy.ts before reaching their Route
